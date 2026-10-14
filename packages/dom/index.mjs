@@ -22,10 +22,13 @@ function wdDomIcon(document, type) {
 }
 
 /** Mount without moving existing pane hosts as tabs, splits, or zoom state change. */
-export function mountWorkspace(element, { client, panels, tabBar = true, onPaneFocus, onPaneClose } = {}) {
+export function mountWorkspace(element, { client, panels, tabBar = true, compactBreakpoint = 640, multiPaneBreakpoint = 980, onPaneFocus, onPaneClose } = {}) {
   if (!element?.ownerDocument || typeof element.append !== 'function') throw new TypeError('mountWorkspace requires a DOM element.');
   if (!client?.subscribe || !client?.call || !client?.snapshot) throw new TypeError('mountWorkspace requires a Viewherd client.');
   if (!panels || typeof panels !== 'object') throw new TypeError('panels must be a renderer map.');
+  for (const [name, value] of Object.entries({ compactBreakpoint, multiPaneBreakpoint })) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) throw new TypeError(`${name} must be a finite nonnegative number.`);
+  }
   const document = element.ownerDocument;
   const view = document.defaultView;
   const instanceId = `wd-workspace-${++wdDomMountSequence}`;
@@ -258,7 +261,7 @@ export function mountWorkspace(element, { client, panels, tabBar = true, onPaneF
     }
     const ids = wdDomLeaves(tab.layout);
     const width = canvas.clientWidth, height = canvas.clientHeight;
-    const compact = width < 640 || (ids.length > 2 && width < 980);
+    const compact = width < compactBreakpoint || (ids.length > 2 && width < multiPaneBreakpoint);
     const focus = ids.includes(tab.focusedPaneId) ? tab.focusedPaneId : ids[0];
     paneSwitch.hidden = !compact || ids.length < 2 || Boolean(tab.zoomedPaneId);
     shell.classList.toggle('wd-compact', compact);

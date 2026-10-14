@@ -3,6 +3,8 @@ import { createAppHandler } from './application.mjs';
 import { createD1Store } from '@viewherd/server';
 import { createSupportState } from '../examples/support-desk/domain.mjs';
 import { createStudioState } from '../examples/product-studio/domain.mjs';
+import { createDemoAgent } from '../examples/product-studio/demo-agent.mjs';
+import { createOpenAIAgent } from '../examples/product-studio/openai-agent.mjs';
 
 export function makeD1Store(db) {
   async function read() {
@@ -22,6 +24,7 @@ export default {
       legacyStore: makeD1Store(env.DB),
       supportStore: createD1Store(env.DB, { createState: createSupportState }),
       studioStore: createD1Store(env.DB, { createState: createStudioState }),
+      agent: env.OPENAI_API_KEY ? createOpenAIAgent({ apiKey: env.OPENAI_API_KEY, model: env.OPENAI_MODEL || 'gpt-4.1-mini' }) : createDemoAgent(),
       assets: WEBDR_ASSETS,
       serviceProtected: true,
     })(request);

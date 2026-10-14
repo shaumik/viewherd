@@ -183,16 +183,17 @@ test('a throwing cached subscriber is removed and does not open an orphan stream
 
 // A minimal DOM harness makes host identity and disposal observable without a
 // browser dependency. Actual positioning and focus are also checked in the demo.
-function wdTestDom() {
+function wdTestDom({ width = 1200, height = 600 } = {}) {
   const document = { defaultView: { ResizeObserver: class { observe() {} disconnect() {} }, getComputedStyle() { return { getPropertyValue() { return '8'; } }; }, addEventListener() {}, removeEventListener() {} }, addEventListener() {}, removeEventListener() {} };
   class Element {
-    constructor(tag) { this.tagName = tag; this.ownerDocument = document; this.children = []; this.attributes = {}; this.style = {}; this.dataset = {}; this.listeners = {}; this._hidden = false; this.hiddenChanges = []; this.parentNode = null; this.className = ''; this.clientWidth = 1200; this.clientHeight = 600; this.classList = { toggle: (name, enabled) => { const current = new Set(this.className.split(' ').filter(Boolean)); if (enabled ?? !current.has(name)) current.add(name); else current.delete(name); this.className = [...current].join(' '); }, add: name => this.classList.toggle(name, true), remove: name => this.classList.toggle(name, false) }; }
+    constructor(tag) { this.tagName = tag; this.ownerDocument = document; this.children = []; this.attributes = {}; this.style = {}; this.dataset = {}; this.listeners = {}; this._hidden = false; this.hiddenChanges = []; this.parentNode = null; this.className = ''; this.clientWidth = width; this.clientHeight = height; this.classList = { toggle: (name, enabled) => { const current = new Set(this.className.split(' ').filter(Boolean)); if (enabled ?? !current.has(name)) current.add(name); else current.delete(name); this.className = [...current].join(' '); }, add: name => this.classList.toggle(name, true), remove: name => this.classList.toggle(name, false) }; }
     get hidden() { return this._hidden; }
     set hidden(value) { if (value !== this._hidden) this.hiddenChanges.push(value); this._hidden = value; }
     append(...children) { for (const child of children) { if (child.parentNode) throw new Error('A connected host was reparented.'); child.parentNode = this; this.children.push(child); } }
     replaceChildren(...children) { for (const child of this.children) child.parentNode = null; this.children = []; this.append(...children); }
     setAttribute(name, value) { this.attributes[name] = value; }
     addEventListener(name, listener) { (this.listeners[name] ||= []).push(listener); }
+    focus() { document.activeElement = this; }
     remove() { if (this.parentNode) { this.parentNode.children = this.parentNode.children.filter(child => child !== this); this.parentNode = null; } }
   }
   document.createElement = tag => new Element(tag);
@@ -251,6 +252,59 @@ test('two SDK mounts with the same pane IDs use distinct accessible title refere
   const secondPane = two.children[0].children[2].children[0];
   assert.notEqual(firstPane.attributes['aria-labelledby'], secondPane.attributes['aria-labelledby']);
   mountOne.destroy(); mountTwo.destroy();
+});
+
+test('custom multi-pane breakpoint keeps a focused chat input connected beside two previews', () => {
+  const initial = wdTestWorkspaceState();
+  initial.panes.pane_side = { id: 'pane_side', view: 'inbox', title: 'Preview A', data: {} };
+  initial.workspaces[0].tabs[0].layout = { type: 'split', id: 'split_main', direction: 'right', ratio: 0.35, first: wdTestLeaf('pane_inbox'), second: wdTestLeaf('pane_side') };
+  const threePanes = structuredClone(initial);
+  threePanes.revision = 1;
+  threePanes.panes.pane_third = { id: 'pane_third', view: 'inbox', title: 'Preview B', data: {} };
+  threePanes.workspaces[0].tabs[0].focusedPaneId = 'pane_third';
+  threePanes.workspaces[0].tabs[0].layout.second = { type: 'split', id: 'split_previews', direction: 'down', ratio: 0.5, first: wdTestLeaf('pane_side'), second: wdTestLeaf('pane_third') };
+
+  for (const [options, expectedVisible] of [[{}, ['pane_third']], [{ multiPaneBreakpoint: 0 }, ['pane_inbox', 'pane_side', 'pane_third']]]) {
+    const root = wdTestDom({ width: 775 });
+    const client = wdTestDomClient(initial);
+    let chatHost, chatInput;
+    const mounted = mountWorkspace(root, { ...options, client, panels: { inbox: { mount(host, context) {
+      if (context.pane.id === 'pane_inbox') {
+        chatHost = host;
+        chatInput = root.ownerDocument.createElement('input');
+        chatInput.value = 'Make another version';
+        host.append(chatInput);
+      }
+    } } } });
+    chatInput.focus();
+    const parent = chatHost.parentNode;
+    client.update(threePanes);
+    const canvas = root.children[0].children[2];
+    const visibleIds = canvas.children.filter(node => node.dataset.paneId && !node.hidden).map(node => node.dataset.paneId);
+    assert.deepEqual(visibleIds, expectedVisible);
+    assert.equal(chatHost.parentNode, parent);
+    assert.equal(chatInput.value, 'Make another version');
+    if (options.multiPaneBreakpoint === 0) {
+      assert.equal(root.ownerDocument.activeElement, chatInput);
+      assert.deepEqual(parent.hiddenChanges, []);
+      assert.equal(root.children[0].children[1].hidden, true);
+      canvas.clientWidth = 390;
+      client.update({ ...threePanes, revision: 2 });
+      assert.deepEqual(canvas.children.filter(node => node.dataset.paneId && !node.hidden).map(node => node.dataset.paneId), ['pane_third']);
+      assert.equal(root.children[0].children[1].hidden, false);
+    }
+    mounted.destroy();
+  }
+});
+
+test('DOM breakpoint options reject invalid widths before mounting', () => {
+  for (const option of ['compactBreakpoint', 'multiPaneBreakpoint']) {
+    for (const value of [-1, Infinity, NaN, '640', null]) {
+      const root = wdTestDom();
+      assert.throws(() => mountWorkspace(root, { client: wdTestDomClient(wdTestWorkspaceState()), panels: {}, [option]: value }), new RegExp(`${option} must be a finite nonnegative number`));
+      assert.equal(root.children.length, 0);
+    }
+  }
 });
 
 test('pane focus commands coalesce so the last human choice wins while a prior call is pending', async () => {

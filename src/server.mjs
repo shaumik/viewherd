@@ -9,6 +9,8 @@ import { createFileStore } from '@viewherd/server/node';
 import { createSupportState } from '../examples/support-desk/domain.mjs';
 import { createStudioState } from '../examples/product-studio/domain.mjs';
 import { ASSET_FILES } from './assets.mjs';
+import { createDemoAgent } from '../examples/product-studio/demo-agent.mjs';
+import { createOpenAIAgent } from '../examples/product-studio/openai-agent.mjs';
 
 globalThis.crypto ??= webcrypto;
 const root=fileURLToPath(new URL('..',import.meta.url));
@@ -21,6 +23,9 @@ const store={kind:'local-file',read:async()=>{await tail;return record;},transac
 const supportStore = createFileStore({path:resolve(process.env.WEBDR_SUPPORT_DATA_FILE ?? resolve(root,'.webdr/support-desk.json')),createState:createSupportState});
 const studioStore = createFileStore({path:resolve(process.env.VIEWHERD_STUDIO_DATA_FILE ?? resolve(root,'.webdr/product-studio.json')),createState:createStudioState});
 const assetFiles = Object.fromEntries(ASSET_FILES.map(([path,file,type]) => [path,[file,type]]));
+const agent = process.env.OPENAI_API_KEY
+  ? createOpenAIAgent({ apiKey: process.env.OPENAI_API_KEY, model: process.env.OPENAI_MODEL || 'gpt-4.1-mini' })
+  : createDemoAgent();
 const server=createServer(async(req,res)=>{
   const abort=new AbortController();
   res.once('close',()=>{if(!res.writableEnded)abort.abort();});
@@ -36,7 +41,7 @@ const server=createServer(async(req,res)=>{
       if(path==='/lab/index.html')content=content.replaceAll('href="/styles.css"','href="/lab/styles.css"').replaceAll('src="/app.js"','src="/lab/app.js"').replaceAll('href="/"','href="/lab"');
       assets[path]={content,type};
     }
-    const response=await createAppHandler({legacyStore:store,supportStore,studioStore,assets,token:process.env.VIEWHERD_TOKEN ?? process.env.WEBDR_TOKEN})(request);
+    const response=await createAppHandler({legacyStore:store,supportStore,studioStore,assets,token:process.env.VIEWHERD_TOKEN ?? process.env.WEBDR_TOKEN,agent})(request);
     res.writeHead(response.status,Object.fromEntries(response.headers));
     if(!response.body){res.end();return;}
     const reader=response.body.getReader();

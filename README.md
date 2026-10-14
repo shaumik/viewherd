@@ -6,7 +6,7 @@ Viewherd adds tabs and split panels to your app. Agents can open panels, change 
 
 [![Watch the demo](docs/demo-poster.jpg)](docs/demo.mp4)
 
-[Watch the 30-second demo](docs/demo.mp4)
+[Watch the demo](docs/demo.mp4)
 
 ## Try it
 
@@ -21,9 +21,9 @@ npm run example
 
 Open [localhost:4317](http://localhost:4317).
 
-The product launch studio turns a product photo into two designs. Refine the colors and copy, pick your favorite, and export it.
+The example is a product launch studio. Ask “Create two directions,” then “Keep the dark one and make it cobalt.” Chat opens and changes real panels. Export the finished design.
 
-The example uses a scripted assistant. No AI model is connected.
+It runs without an API key using a demo agent on the server. [Connect a real model or your own agent](docs/AGENTS.md).
 
 ## Use it in your app
 

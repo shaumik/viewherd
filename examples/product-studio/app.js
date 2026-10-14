@@ -48,13 +48,13 @@ async function saveOpenEditors(recoverDesignId) {
     if (!draft.dirty) continue;
     const editor = editors.get(id);
     if (!editor && id === recoverDesignId) continue;
-    if (!editor) throw new Error('Your unsaved copy is safe. Recover or discard it in Creative brief before continuing.');
+    if (!editor) throw new Error('Your unsaved copy is safe. Recover or discard it in Studio chat before continuing.');
     await editor.save();
   }
 }
-let running = false;
+let running = false, assistantBusy = false;
 async function run(task, message, { recoverDesignId } = {}) {
-  if (running) return;
+  if (running || assistantBusy) { notify('Let the assistant finish this turn first.'); return; }
   running = true;
   try { await saveOpenEditors(recoverDesignId); const result = await task(); if (message) notify(typeof message === 'function' ? message(result) : message); return result; }
   catch (error) { notify(error.message || 'That change could not be completed.', true); throw error; }
@@ -63,7 +63,7 @@ async function run(task, message, { recoverDesignId } = {}) {
 function handled(promise) { Promise.resolve(promise).catch(() => {}); }
 async function studioAction(action, args = {}) {
   const pane = studioPane();
-  if (!pane) throw new Error('Open the creative brief panel to continue.');
+  if (!pane) throw new Error('Open Studio chat to continue.');
   return client.call('panel.action', { paneId: pane.id, action, args });
 }
 const client = createClient({
@@ -74,33 +74,127 @@ const client = createClient({
   },
 });
 
+async function readAssistantStream(response, onEvent) {
+  if (!response.body || !response.headers.get('content-type')?.includes('application/x-ndjson')) throw new Error('The assistant returned an invalid stream. Try again.');
+  const reader = response.body.getReader(), decoder = new TextDecoder('utf-8', { fatal: true });
+  let buffer = '', received = 0, complete = false;
+  function line(value) {
+    const text = value.trim(); if (!text) return false;
+    if (text.length > 131072) throw new Error('The assistant response was too large. Try a shorter request.');
+    let event; try { event = JSON.parse(text); } catch { throw new Error('The assistant response was interrupted. Your workspace is safe.'); }
+    if (!event || typeof event !== 'object' || typeof event.type !== 'string') throw new Error('The assistant returned an invalid event.');
+    onEvent(event); return event.type === 'done';
+  }
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (value) { received += value.byteLength; if (received > 2097152) throw new Error('The assistant response was too large.'); buffer += decoder.decode(value, { stream: true }); }
+      if (done) buffer += decoder.decode();
+      let newline;
+      while ((newline = buffer.indexOf('\n')) !== -1) {
+        const value = buffer.slice(0, newline); buffer = buffer.slice(newline + 1);
+        if (line(value)) { complete = true; return; }
+      }
+      if (buffer.length > 131072) throw new Error('The assistant response was too large.');
+      if (done) { if (buffer.trim()) complete = line(buffer); if (!complete) throw new Error('The assistant disconnected before finishing. Your workspace is safe.'); return; }
+    }
+  } finally { try { await reader.cancel(); } catch {} reader.releaseLock(); }
+}
+
 function studioRenderer(host, initial) {
-  let ctx = initial, disposed = false, busy = false;
-  const root = el('div', 'studio'), body = el('div', 'studio-content');
-  body.append(el('div', 'overline', 'A product. A point of view.'), el('h1', 'studio-title', 'Make your\nnext launch.'), el('p', 'studio-description', 'Turn one product photo into a campaign worth stopping for.'));
-  const asset = el('div', 'asset-card'), img = el('img'); img.alt = 'FORMA One headphones, the source product photo';
+  let ctx = initial, disposed = false, sending = false, localTurn = null, streamController = null;
+  let assistantMode = 'demo', model = null, assetSrc = null, streamError = null, scheduledScroll = null, expiryTimer = null;
+  const infoController = new AbortController(), turnNodes = new Map();
+  const root = el('section', 'studio chat-studio'); root.setAttribute('aria-label', 'Studio chat');
+  const head = el('div', 'chat-header'), avatar = el('span', 'assistant-avatar'); avatar.append(icon('sparkle'));
+  const heading = el('div', 'chat-heading'); heading.append(el('h1', '', 'Forma assistant'));
+  const modeLabel = el('p', 'chat-mode', 'Connecting to the agent…'); heading.append(modeLabel);
+  head.append(avatar, heading, el('span', 'chat-server-badge', 'SERVER'));
+  const scroll = el('div', 'chat-scroll'), introduction = el('div', 'chat-intro');
+  const asset = el('div', 'chat-attachment'), img = el('img'); img.alt = 'FORMA One headphones';
+  const metadata = el('div', 'chat-attachment-meta'), assetName = el('strong'), assetCaption = el('span', '', 'Product photo · ready to use'); metadata.append(assetName, assetCaption);
   const file = el('input'); file.type = 'file'; file.accept = 'image/png,image/jpeg,image/webp'; file.hidden = true;
-  const upload = button('Replace', 'asset-change', null, () => file.click()); upload.setAttribute('aria-label', 'Replace the product photo');
-  asset.append(img, el('span', 'asset-card-label', 'Your source image'), upload, file);
-  const meta = el('div', 'asset-meta'), assetName = el('span', 'asset-name'), source = el('span', '', 'PNG / WebP'); meta.append(assetName, source);
-  const error = el('p', 'upload-error'); error.hidden = true;
-  body.append(asset, meta, error, el('div', 'brief-rule'), el('p', 'brief-label', 'THE BRIEF'), el('p', 'brief-copy', 'Launch FORMA One. Quiet confidence. Beautiful sound. Make two directions, then make one your own.'));
-  const create = button('Create two directions', 'primary-button', 'sparkle', () => command('createDirections', {}, 'Two directions, two live canvases.'));
-  const list = el('div', 'prompt-list');
-  const refine = button('Make it midnight', 'prompt-button', 'arrow', () => command('refine', { theme: 'midnight', headline: 'Less noise.\nMore you.', subhead: 'Your world. Your volume. Your everyday escape.', cta: 'Find your quiet' }, 'A new palette and new copy, applied to the live canvas.'));
-  const inspect = button('Let me fine-tune it', 'prompt-button', 'edit', () => command('inspect', {}, 'Opened editing controls beside your design.'));
-  const compare = button('Compare both directions', 'prompt-button', 'panels', () => command('compare', {}, 'Both directions are back. Your edits are still here.'));
-  const exportButton = button('Export the campaign', 'prompt-button', 'download', () => command('export', {}, 'Your campaign is ready to download.'));
-  list.append(refine, inspect, compare, exportButton);
-  const actionLabel = el('div', 'action-label'); actionLabel.append(icon('check'), el('span', '', 'Every change happens in the live workspace'));
+  const upload = button('Replace', 'chat-replace', null, () => file.click()); upload.setAttribute('aria-label', 'Replace the product photo');
+  asset.append(img, metadata, upload, file);
+  introduction.append(asset, el('p', 'chat-welcome', "I've got your product photo. Tell me what you want to make — I'll build it in the workspace beside us."));
+  const transcript = el('div', 'chat-transcript'); transcript.setAttribute('role', 'log'); transcript.setAttribute('aria-label', 'Conversation with Forma assistant'); transcript.setAttribute('aria-live', 'polite'); transcript.setAttribute('aria-relevant', 'additions text');
+  const starters = el('div', 'chat-starters'), starterLabel = el('p', '', 'TRY ASKING'); starters.append(starterLabel);
+  const create = button('Create two launch directions', 'chat-starter', 'arrow', () => send('Create two launch directions for this product.'));
+  const dark = button('Make it midnight. Less noise. More you.', 'chat-starter', 'arrow', () => send('Make it midnight and change the headline to "Less noise. More you."'));
+  starters.append(create, dark);
   const recovery = el('div', 'draft-recovery'); recovery.hidden = true;
-  body.append(create, list, actionLabel, recovery);
-  const history = el('div', 'studio-history'), historyHeader = el('div', 'history-head'), historyList = el('div', 'history-list');
-  historyHeader.append(el('span', 'history-indicator'), el('span', '', 'STUDIO ACTIVITY'));
-  const footnote = el('p', 'studio-footnote'); footnote.append(document.createTextNode('Scripted demo · '));
+  scroll.append(introduction, transcript, starters, recovery);
+  const bottom = el('div', 'chat-bottom'), error = el('p', 'chat-error'); error.hidden = true; error.setAttribute('role', 'alert');
+  const form = el('form', 'chat-composer'), input = el('textarea'); input.rows = 2; input.maxLength = 2000; input.placeholder = 'Ask the agent to change your workspace…'; input.setAttribute('aria-label', 'Message the assistant');
+  const composeRow = el('div', 'chat-composer-row'), hint = el('span', 'chat-compose-hint', 'Enter to send');
+  const sendButton = button('', 'chat-send', 'arrow'); sendButton.type = 'submit'; sendButton.setAttribute('aria-label', 'Send message'); composeRow.append(hint, sendButton); form.append(input, composeRow);
+  const footnote = el('p', 'chat-footnote'); footnote.append(document.createTextNode('The agent calls Viewherd on the server. '));
   const sdkLink = el('a', '', 'Connect your own agent'); sdkLink.href = 'https://github.com/shaumik/viewherd/blob/main/docs/SDK.md'; sdkLink.target = '_blank'; sdkLink.rel = 'noopener noreferrer'; footnote.append(sdkLink);
-  history.append(historyHeader, historyList, footnote); root.append(body, history); host.append(root);
-  const controls = [create, refine, inspect, compare, exportButton, upload];
+  bottom.append(error, form, footnote); root.append(head, scroll, bottom); host.append(root);
+
+  function nearBottom() { return scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 72; }
+  function scrollToLatest(force = false) {
+    if (!force && !nearBottom()) return;
+    if (scheduledScroll !== null) cancelAnimationFrame(scheduledScroll);
+    scheduledScroll = requestAnimationFrame(() => { scheduledScroll = null; if (!disposed) scroll.scrollTop = scroll.scrollHeight; });
+  }
+  function activeTurn() {
+    const chat = ctx.state.app.chat;
+    return chat?.turns?.find(turn => turn.id === chat.activeTurnId && turn.status === 'running' && Number.isFinite(turn.expiresAt) && turn.expiresAt > Date.now());
+  }
+  function setBusy(value) {
+    sending = value;
+    const remote = activeTurn(), locked = value || !!remote; assistantBusy = locked;
+    clearTimeout(expiryTimer); expiryTimer = null;
+    if (remote) expiryTimer = setTimeout(() => { if (!disposed) { setBusy(sending); paintConversation(); } }, Math.min(2147483647, Math.max(1, remote.expiresAt - Date.now() + 1)));
+    input.disabled = locked; sendButton.disabled = locked || !input.value.trim(); upload.disabled = locked; create.disabled = dark.disabled = locked;
+    document.getElementById('reset-demo').disabled = locked;
+    hint.textContent = locked ? value ? 'Agent is working…' : 'Another agent is working…' : 'Enter to send';
+    form.dataset.busy = String(locked);
+  }
+  function makeTurn(turn) {
+    const node = el('article', 'chat-turn'), user = el('div', 'chat-user-message'), reply = el('div', 'chat-assistant-message'), response = el('p', 'chat-response'), steps = el('div', 'chat-tool-steps'), status = el('p', 'chat-turn-status');
+    reply.append(response, steps, status); node.append(user, reply);
+    const entry = { node, user, response, steps, status, stepNodes: new Map() }; turnNodes.set(turn.id, entry); return entry;
+  }
+  function paintTurn(turn) {
+    const entry = turnNodes.get(turn.id) || makeTurn(turn);
+    entry.user.textContent = turn.message || '';
+    entry.response.textContent = turn.reply || ''; entry.response.hidden = !turn.reply;
+    const seen = new Set();
+    for (const step of turn.steps || []) {
+      if (!step || typeof step.id !== 'string') continue;
+      seen.add(step.id); let row = entry.stepNodes.get(step.id);
+      if (!row) { row = el('div', 'chat-tool-step'); row.append(el('span', 'chat-step-icon'), el('span', 'chat-step-label')); entry.stepNodes.set(step.id, row); entry.steps.append(row); }
+      row.dataset.status = step.status;
+      row.querySelector('.chat-step-icon').textContent = step.status === 'done' ? '✓' : step.status === 'failed' ? '!' : '·';
+      row.querySelector('.chat-step-label').textContent = step.label || 'Update workspace';
+      if (step.error) row.title = step.error; else row.removeAttribute('title');
+    }
+    for (const [id, row] of entry.stepNodes) if (!seen.has(id)) { row.remove(); entry.stepNodes.delete(id); }
+    entry.steps.hidden = !(turn.steps?.length);
+    entry.status.hidden = turn.status === 'completed' || (!!turn.reply && turn.status !== 'failed');
+    entry.status.textContent = turn.status === 'failed' ? 'This turn could not finish. Your changes are still in the workspace.' : turn.steps?.length ? 'Working in your workspace…' : 'Thinking…';
+    entry.status.dataset.status = turn.status;
+    return entry.node;
+  }
+  function paintConversation(force = false) {
+    const follow = force || nearBottom(), remote = ctx.state.app.chat?.turns || [];
+    const turns = remote.filter(turn => !localTurn || turn.id !== localTurn.id);
+    if (localTurn) turns.push(localTurn);
+    const seen = new Set();
+    for (const turn of turns) {
+      if (!turn || typeof turn.id !== 'string') continue;
+      seen.add(turn.id); const node = paintTurn(turn);
+      // Keep existing message nodes connected while streaming text and tool results.
+      const previous = transcript.children[seen.size - 1]; if (previous !== node) transcript.insertBefore(node, previous || null);
+    }
+    for (const [id, entry] of turnNodes) if (!seen.has(id)) { entry.node.remove(); turnNodes.delete(id); }
+    starters.hidden = turns.length > 0;
+    introduction.classList.toggle('has-conversation', turns.length > 0);
+    error.hidden = !streamError; error.textContent = streamError || '';
+    if (follow) scrollToLatest(true);
+  }
   function paintRecovery() {
     if (disposed) return;
     const orphan = [...editDrafts].find(([id, draft]) => draft.dirty && !editors.has(id));
@@ -113,33 +207,90 @@ function studioRenderer(host, initial) {
     const row = el('div', 'recovery-actions'); row.append(resume, discard); recovery.append(row);
   }
   recoveryListeners.add(paintRecovery);
-  function setBusy(value) { busy = value; controls.forEach(control => { control.disabled = value; }); create.querySelector('span').textContent = value ? 'Working on your studio…' : 'Create two directions'; }
-  async function command(action, args, message) {
-    if (busy) return; setBusy(true);
-    try { await run(() => ctx.action(action, args), message); } catch {} finally { if (!disposed) setBusy(false); }
-  }
-  file.addEventListener('change', async () => {
-    const chosen = file.files?.[0]; if (!chosen) return;
-    error.hidden = true; setBusy(true);
+  async function send(value) {
+    const message = (typeof value === 'string' ? value : input.value).trim();
+    if (!message || sending || activeTurn() || running) return;
+    if (message.length > 2000) { streamError = 'Keep your request under 2,000 characters.'; paintConversation(); return; }
+    streamError = null; setBusy(true); input.value = ''; paintConversation();
+    const requestId = crypto.randomUUID(), controller = new AbortController(); streamController = controller;
+    const timeout = setTimeout(() => controller.abort(), 180000);
+    let completed = false, failed = false;
     try {
-      const src = await normalizePhoto(chosen);
-      await run(() => ctx.action('upload', { src, name: chosen.name.trim().slice(0, 80) || 'Product photo' }), 'Your product photo is now in every direction.');
-    } catch (failure) { error.textContent = failure.message; error.hidden = false; } finally { file.value = ''; if (!disposed) setBusy(false); }
+      await saveOpenEditors();
+      if (disposed) return;
+      localTurn = { id: requestId, message, mode: assistantMode, status: 'running', reply: '', steps: [] }; paintConversation(true);
+      const response = await fetch('/assistant', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', accept: 'application/x-ndjson' }, body: JSON.stringify({ requestId, message }), signal: controller.signal });
+      if (!response.ok) {
+        let detail; try { detail = await response.json(); } catch {}
+        throw new Error(detail?.error?.message || detail?.message || `The assistant could not start (${response.status}). Try again.`);
+      }
+      await readAssistantStream(response, event => {
+        if (disposed) return;
+        if (event.type === 'start') {
+          if (typeof event.turnId !== 'string' || !event.turnId) throw new Error('The assistant returned an invalid turn.');
+          const entry = turnNodes.get(localTurn.id); if (entry) { turnNodes.delete(localTurn.id); turnNodes.set(event.turnId, entry); }
+          localTurn.id = event.turnId; localTurn.mode = event.mode; if (['demo', 'openai'].includes(event.mode)) { assistantMode = event.mode; modeLabel.textContent = event.mode === 'openai' ? `${model || 'OpenAI agent'} · runs on server` : 'Demo agent · runs on server'; }
+        } else if (event.type === 'text') {
+          if (typeof event.text !== 'string' || localTurn.reply.length + event.text.length > 20000) throw new Error('The assistant response was too large.');
+          localTurn.reply += event.text;
+        } else if (event.type === 'tool') {
+          const step = event.step;
+          if (!step || typeof step.id !== 'string' || typeof step.label !== 'string' || !['running', 'done', 'failed'].includes(step.status)) throw new Error('The assistant returned an invalid tool result.');
+          const previous = localTurn.steps.findIndex(item => item.id === step.id);
+          if (previous >= 0) localTurn.steps[previous] = step; else { if (localTurn.steps.length >= 12) throw new Error('The assistant returned too many tool steps.'); localTurn.steps.push(step); }
+        } else if (event.type === 'done') {
+          if (!event.turn || event.turn.id !== localTurn.id || !['completed', 'failed'].includes(event.turn.status)) throw new Error('The assistant returned an invalid completion.');
+          localTurn = event.turn; completed = true; failed = event.turn.status === 'failed';
+        } else if (event.type === 'error') {
+          streamError = typeof event.message === 'string' ? event.message : 'The assistant could not finish this turn.';
+        } else throw new Error('The assistant returned an unknown event.');
+        paintConversation();
+      });
+      // Read the latest authoritative workspace immediately; SSE remains subscribed.
+      try { await client.snapshot(); } catch { notify('The agent finished. Reconnecting to your live workspace…'); }
+      const persisted = client.state?.app?.chat?.turns?.find(turn => turn.id === localTurn?.id);
+      if (persisted && persisted.status !== 'running') localTurn = null;
+      if (failed) input.value = message;
+    } catch (failure) {
+      if (disposed) return;
+      streamError = failure.name === 'AbortError' ? 'The assistant connection timed out. Your workspace is safe. Try again.' : failure.message || 'The assistant connection was interrupted. Try again.';
+      input.value = message;
+      if (localTurn) localTurn.status = 'failed';
+      try { await client.snapshot(); } catch {}
+      const persisted = client.state?.app?.chat?.turns?.find(turn => turn.id === localTurn?.id);
+      if (persisted && persisted.status !== 'running') localTurn = null;
+    } finally {
+      clearTimeout(timeout); if (streamController === controller) streamController = null;
+      if (!disposed) { setBusy(false); paintConversation(); const focused = document.activeElement; if (completed && !failed && input.offsetParent !== null && (focused === document.body || form.contains(focused) || focused === create || focused === dark)) input.focus({ preventScroll: true }); }
+      else assistantBusy = false;
+    }
+  }
+  form.addEventListener('submit', event => { event.preventDefault(); handled(send()); });
+  input.addEventListener('input', () => { sendButton.disabled = sending || !!activeTurn() || !input.value.trim(); input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 128)}px`; });
+  input.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); handled(send()); } });
+  file.addEventListener('change', async () => {
+    const chosen = file.files?.[0]; if (!chosen || sending) return;
+    streamError = null; upload.disabled = true;
+    try { const src = await normalizePhoto(chosen); await run(() => ctx.action('upload', { src, name: chosen.name.trim().slice(0, 80) || 'Product photo' }), 'Your product photo is now in every direction.'); }
+    catch (failure) { streamError = failure.message; paintConversation(); }
+    finally { file.value = ''; if (!disposed) upload.disabled = sending || !!activeTurn(); }
   });
-  let historySequence = null, assetSrc = null;
+  fetch('/assistant', { credentials: 'same-origin', cache: 'no-store', signal: infoController.signal })
+    .then(async response => { if (!response.ok) throw new Error('unavailable'); return response.json(); })
+    .then(info => { if (disposed) return; assistantMode = info.mode === 'openai' ? 'openai' : 'demo'; model = typeof info.model === 'string' ? info.model : null; modeLabel.textContent = assistantMode === 'openai' ? `${model || 'OpenAI agent'} · runs on server` : 'Demo agent · runs on server'; })
+    .catch(() => { if (!disposed) modeLabel.textContent = 'Agent connection unavailable'; });
   function update(next) {
     ctx = next; const app = ctx.state.app;
     if (assetSrc !== app.asset.src) { img.src = app.asset.src; assetSrc = app.asset.src; }
     img.alt = app.asset.name; assetName.textContent = app.asset.name;
-    const entries = app.history || [];
-    if (historySequence !== app.sequence) {
-      historySequence = app.sequence; historyList.replaceChildren();
-      if (!entries.length) historyList.append(el('p', 'history-empty', 'Your brief controls the canvas. Start with two directions.'));
-      for (const entry of entries.slice(-3).reverse()) { const row = el('div', 'history-entry'); row.append(icon('check'), el('span', '', entry.label)); historyList.append(row); }
+    if (!sending && localTurn) {
+      const persisted = app.chat?.turns?.find(turn => turn.id === localTurn.id);
+      if (persisted && persisted.status !== 'running') localTurn = null;
     }
-    queueMicrotask(paintRecovery);
+    setBusy(sending); paintConversation(); queueMicrotask(paintRecovery);
   }
-  update(ctx); return { update, destroy() { disposed = true; recoveryListeners.delete(paintRecovery); } };
+  update(ctx);
+  return { update, destroy() { disposed = true; infoController.abort(); streamController?.abort(); clearTimeout(expiryTimer); if (scheduledScroll !== null) cancelAnimationFrame(scheduledScroll); recoveryListeners.delete(paintRecovery); assistantBusy = false; document.getElementById('reset-demo').disabled = false; } };
 }
 
 function canvasRenderer(host, initial) {
@@ -230,7 +381,7 @@ function inspectorRenderer(host, initial) {
         }
       }
       const savedDesign = client.state?.app?.designs?.[designId];
-      if (!savedDesign) throw new Error('This design was removed while saving. Your copy is preserved in Creative brief.');
+      if (!savedDesign) throw new Error('This design was removed while saving. Your copy is preserved in Studio chat.');
       draft.values = pickDesign(savedDesign); draft.base = designKey(savedDesign); draft.dirty = false;
       if (!disposed) { paintValues(); status.textContent = 'Saved. Your live artboard has been updated.'; status.dataset.error = 'false'; }
     } catch (error) { if (!disposed) { status.textContent = error.message || 'Could not save. Your draft is still here.'; status.dataset.error = 'true'; } throw error; }
@@ -250,7 +401,7 @@ function inspectorRenderer(host, initial) {
   function update(next) {
     ctx = next;
     const design = currentDesign(ctx);
-    if (!design) { status.textContent = 'This design was removed elsewhere. Your unsaved copy is preserved in Creative brief.'; status.dataset.error = 'true'; saveButton.disabled = true; return; }
+    if (!design) { status.textContent = 'This design was removed elsewhere. Your unsaved copy is preserved in Studio chat.'; status.dataset.error = 'true'; saveButton.disabled = true; return; }
     if (!draft.dirty && !saving) { draft.values = pickDesign(design); draft.base = designKey(design); paintValues(); }
   }
   paintValues(); lock(!!draft.saving); return { update, destroy() { disposed = true; if (editors.get(designId) === editor) editors.delete(designId); if (!draft.dirty && !draft.saving) editDrafts.delete(designId); refreshRecovery(); } };
@@ -328,7 +479,7 @@ async function normalizePhoto(file) {
 }
 
 mountWorkspace(document.getElementById('workspace'), {
-  client, tabBar: false,
+  client, tabBar: false, multiPaneBreakpoint: 0,
   panels: {
     studio: { mount: studioRenderer }, canvas: { mount: canvasRenderer },
     inspector: { mount: inspectorRenderer }, deliverables: { mount: deliverablesRenderer },

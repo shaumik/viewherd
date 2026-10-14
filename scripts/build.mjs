@@ -7,7 +7,7 @@ import { ASSET_FILES } from '../src/assets.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const modules = new Map();
 const declarations = [];
-const localPackages = { '@viewherd/core': 'packages/core/index.mjs', '@viewherd/server': 'packages/server/index.mjs' };
+const localPackages = { '@viewherd/core': 'packages/core/index.mjs', '@viewherd/server': 'packages/server/index.mjs', '@viewherd/client': 'packages/client/index.mjs' };
 
 // A dependency-free module linker preserves module scopes in the Worker artifact.
 async function linkModule(path) {

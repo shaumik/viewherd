@@ -52,4 +52,15 @@ const studioMcp = await (await request('/mcp', {method:'POST',headers:{'MCP-Prot
 assert.ok(studioMcp.result.tools.find(tool => tool.name === 'viewherd_action_studio_createDirections'));
 assert.ok(rows.has('sdk:product-studio'));
 assert.equal((await request('/viewherd/snapshot?sessionId=support-desk')).status, 403);
+const assistantConfig = await request('/assistant');
+assert.equal(assistantConfig.status, 200);
+assert.equal((await assistantConfig.json()).mode, 'demo');
+const chatResponse = await request('/assistant', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestId: 'artifact-chat-select', message: 'Keep the dark one and make it cobalt' }) });
+assert.equal(chatResponse.status, 200);
+const chatEvents = (await chatResponse.text()).trim().split('\n').map(line => JSON.parse(line));
+assert.ok(chatEvents.some(event => event.type === 'done' && event.turn.status === 'completed'));
+const chatWorkspace = await (await request('/viewherd/snapshot?sessionId=product-studio')).json();
+assert.equal(Object.values(chatWorkspace.panes).filter(pane => pane.view === 'canvas').length, 1);
+assert.equal(chatWorkspace.app.designs.design_midnight.theme, 'cobalt');
+assert.ok(chatWorkspace.events.find(event => event.actor === 'agent:studio' && event.action === 'refine'));
 console.log('Generated Worker serves Forma Studio, Relay, SDK modules, legacy lab, transactional actions, isolated sessions and MCP tools.');
