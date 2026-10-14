@@ -27,6 +27,12 @@ It runs without an API key using a demo agent on the server. [Connect a real mod
 
 ## Use it in your app
 
-Follow the [SDK guide](docs/SDK.md). The SDK packages are included in this repo and are not on npm yet.
+Start with the [small, copyable example](examples/basic). It opens, edits, and closes notes from chat:
+
+```sh
+npm run example:basic
+```
+
+Open [localhost:4318](http://localhost:4318). Then follow the [SDK guide](docs/SDK.md) to add your own panels and agent. The SDK packages are included in this repo and are not on npm yet.
 
 [MIT licensed](LICENSE).

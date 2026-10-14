@@ -1,23 +1,61 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#171a18">
-  <title>Forma launch studio · Viewherd</title>
-  <meta name="description" content="Chat with an agent that builds, edits, and arranges your live workspace. A Viewherd example.">
-  <link rel="stylesheet" href="/sdk/dom/styles.css">
-  <link rel="stylesheet" href="/examples/product-studio/styles.css">
-</head>
-<body>
-  <header class="app-header">
-    <a class="wordmark" href="/" aria-label="Viewherd home"><svg viewBox="0 0 28 28" aria-hidden="true"><path d="M3 5h9v18H3zM16 5h9v8h-9zM16 17h9v6h-9z" fill="currentColor"/></svg><span>viewherd<span class="wordmark-dot">.</span></span></a>
-    <div class="project-heading"><span class="project-line"></span><span>Forma</span><span class="project-slash">/</span><span class="project-name">Launch studio</span></div>
-    <div class="header-actions"><span class="connection"><span class="connection-dot"></span><span id="connection-label">Connecting</span></span><button id="reset-demo" class="header-button" type="button">Start over</button><a class="github-link" href="https://github.com/shaumik/viewherd" target="_blank" rel="noopener noreferrer" aria-label="Viewherd on GitHub"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 .8a11.2 11.2 0 0 0-3.54 21.82c.56.1.77-.24.77-.54v-2.1c-3.13.68-3.8-1.32-3.8-1.32-.52-1.3-1.26-1.65-1.26-1.65-1.02-.7.08-.68.08-.68 1.13.08 1.72 1.16 1.72 1.16 1 .17 1.63 1.26 3.28.9.1-.73.39-1.26.71-1.55-2.5-.28-5.13-1.25-5.13-5.57 0-1.24.44-2.25 1.16-3.04-.11-.29-.5-1.44.11-3 0 0 .95-.3 3.08 1.15a10.7 10.7 0 0 1 5.6 0c2.14-1.46 3.08-1.15 3.08-1.15.61 1.56.23 2.71.12 3 .72.79 1.15 1.8 1.15 3.04 0 4.34-2.64 5.29-5.15 5.57.4.35.76 1.02.76 2.08v3.22c0 .3.2.64.77.54A11.2 11.2 0 0 0 12 .8Z"/></svg></a></div>
-  </header>
-  <main id="workspace" aria-label="Product campaign workspace"></main>
-  <div id="toast" class="toast" role="status" hidden></div>
-  <div id="boot-error" class="boot-error" role="alert" hidden><p>This studio could not connect.</p><button id="retry-connect" type="button">Try again</button></div>
-  <script type="module" src="/examples/product-studio/app.js"></script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#171a18" />
+    <title>Forma launch studio · Viewherd</title>
+    <meta
+      name="description"
+      content="Chat with an agent that builds, edits, and arranges your live workspace. A Viewherd example."
+    />
+    <link rel="stylesheet" href="/sdk/dom/styles.css" />
+    <link rel="stylesheet" href="/examples/product-studio/styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <a class="wordmark" href="/" aria-label="Viewherd home"
+        ><svg viewBox="0 0 28 28" aria-hidden="true">
+          <path
+            d="M3 5h9v18H3zM16 5h9v8h-9zM16 17h9v6h-9z"
+            fill="currentColor"
+          /></svg
+        ><span>viewherd<span class="wordmark-dot">.</span></span></a
+      >
+      <div class="project-heading">
+        <span class="project-line"></span><span>Forma</span
+        ><span class="project-slash">/</span
+        ><span class="project-name">Launch studio</span>
+      </div>
+      <div class="header-actions">
+        <span class="connection"
+          ><span class="connection-dot"></span
+          ><span id="connection-label">Connecting</span></span
+        ><button id="reset-demo" class="header-button" type="button">
+          Start over</button
+        ><a
+          class="github-link"
+          href="https://github.com/shaumik/viewherd"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Viewherd on GitHub"
+          ><svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M12 .8a11.2 11.2 0 0 0-3.54 21.82c.56.1.77-.24.77-.54v-2.1c-3.13.68-3.8-1.32-3.8-1.32-.52-1.3-1.26-1.65-1.26-1.65-1.02-.7.08-.68.08-.68 1.13.08 1.72 1.16 1.72 1.16 1 .17 1.63 1.26 3.28.9.1-.73.39-1.26.71-1.55-2.5-.28-5.13-1.25-5.13-5.57 0-1.24.44-2.25 1.16-3.04-.11-.29-.5-1.44.11-3 0 0 .95-.3 3.08 1.15a10.7 10.7 0 0 1 5.6 0c2.14-1.46 3.08-1.15 3.08-1.15.61 1.56.23 2.71.12 3 .72.79 1.15 1.8 1.15 3.04 0 4.34-2.64 5.29-5.15 5.57.4.35.76 1.02.76 2.08v3.22c0 .3.2.64.77.54A11.2 11.2 0 0 0 12 .8Z"
+            /></svg
+        ></a>
+      </div>
+    </header>
+    <main id="workspace" aria-label="Product campaign workspace"></main>
+    <div id="toast" class="toast" role="status" hidden></div>
+    <div id="boot-error" class="boot-error" role="alert" hidden>
+      <p>This studio could not connect.</p>
+      <button id="retry-connect" type="button">Try again</button>
+    </div>
+    <script
+      type="module"
+      src="/examples/product-studio/client/main.js"
+    ></script>
+  </body>
 </html>

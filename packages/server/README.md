@@ -34,6 +34,33 @@ const response = await handle(request);
 
 `authorize` is mandatory. A principal must be a JSON object with a non-empty `id` of at most 120 characters. Optional `actor` has the same limit; it supplies audit attribution. Caller-supplied actor fields cannot confer authority. Return `null` or `false` for HTTP 401; throw an error with `code: 'forbidden'` or `status: 403` for HTTP 403. Unexpected authentication errors return HTTP 500 without exposing internal messages. Perform your own session, action and data access checks here. The adapter neither mints accounts nor assumes tenant access.
 
+## Control a session from your backend
+
+Use a controller when your agent runs in the same backend as the store. It executes the same commands as HTTP and MCP without making an HTTP request.
+
+```js
+import { createController } from '@viewherd/server';
+
+// Your host has already authenticated this user and checked session access.
+const controller = createController({
+  registry,
+  store,
+  sessionId: 'your-session',
+  principal: { id: user.id, actor: 'agent' },
+});
+
+const state = await controller.snapshot();
+await controller.call('panel.action', {
+  paneId: state.workspaces[0].tabs[0].focusedPaneId,
+  action: 'open',
+  args: { ticketId: 'SUP-1042' },
+}, { expectedRevision: state.revision });
+```
+
+The controller is a trusted server capability. Create it after authenticating the caller and checking access to its fixed session; never accept a principal from a browser. `principal` can also be an async function receiving `{sessionId, method, params}`. It runs before every operation, so you can recheck permission or supply fresh server metadata. Returning `null` or `false` denies access before storage is read.
+
+`snapshot()` returns current state; `schema()` returns operation and panel schemas. `call(method, params, {requestId, expectedRevision, signal})` returns the same command response as HTTP. Supply a stable request ID for retries. Conflicts throw an error with `code: 'revision_conflict'`; read a fresh snapshot before deciding whether to retry. Cancellation is checked before storage access and before and after registered actions. Already committed commands still require their request ID for a safe retry. `state` is a detached copy of the latest observed state. `destroy()` clears that cached state and prevents further use; it does not delete the session.
+
 ## Wire contract
 
 Default routes are `GET /viewherd/snapshot`, `GET /viewherd/schema`, `GET /viewherd/events`, `POST /viewherd/rpc` and `POST /mcp`. GET routes require `?sessionId=your-session` unless a fixed `sessionId` is configured on the handler. A configured session also rejects other session IDs. IDs have at most 120 characters and match `[A-Za-z0-9][A-Za-z0-9_.:-]*`.

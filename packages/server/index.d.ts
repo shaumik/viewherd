@@ -13,6 +13,25 @@ export interface SessionStore {
   transact<T>(sessionId: string, transaction: Transaction<T>): Promise<T>;
 }
 export interface AuthorizationContext { sessionId: string; method: string; params: Record<string, unknown> }
+/** A trusted server identity, resolved before every operation. null/false denies access. */
+export type ControllerPrincipal = Principal | ((context: AuthorizationContext) => Principal | null | false | Promise<Principal | null | false>);
+export interface ControllerOptions {
+  registry: PanelRegistry;
+  store: SessionStore;
+  sessionId: string;
+  /** Authenticate the caller and check session access in your host before granting this capability. */
+  principal: ControllerPrincipal;
+}
+export interface ControllerCallOptions { requestId?: string; expectedRevision?: number; signal?: AbortSignal }
+export interface ViewherdController {
+  readonly sessionId: string;
+  /** Latest state observed by this controller; reads return detached copies. */
+  readonly state: ViewherdState | null;
+  snapshot(): Promise<ViewherdState>;
+  schema(): Promise<Record<string, JSONValue>>;
+  call(method: string, params?: Record<string, JSONValue>, options?: ControllerCallOptions): Promise<CommandResponse>;
+  destroy(): void;
+}
 /** null/false means unauthenticated (401). Throw {code:'forbidden'} or {status:403} for forbidden access. */
 export type Authorize = (request: Request, context: AuthorizationContext) => Principal | null | false | Promise<Principal | null | false>;
 export interface HandlerOptions {
@@ -38,6 +57,7 @@ export interface D1DatabaseLike {
 }
 export function createMemoryStore(options?: StateFactoryOptions & { maxSessions?: number }): SessionStore;
 export function createD1Store(database: D1DatabaseLike, options?: StateFactoryOptions & { retries?: number }): SessionStore;
+export function createController(options: ControllerOptions): ViewherdController;
 export function createViewherdHandler(options: HandlerOptions): (request: Request) => Promise<Response>;
 export type { Command };
 

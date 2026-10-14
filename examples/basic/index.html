@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Viewherd · Basic example</title>
+    <link rel="stylesheet" href="/sdk/dom/styles.css" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header>
+      <a href="https://github.com/shaumik/viewherd">viewherd.</a
+      ><span>Basic example</span>
+    </header>
+    <main>
+      <aside aria-label="Chat controller">
+        <div class="intro">
+          <h1>Chat controls the workspace.</h1>
+          <p>
+            The server turns these three demo requests into SDK calls. No AI
+            model is connected.
+          </p>
+        </div>
+        <div
+          id="messages"
+          role="log"
+          aria-label="Conversation"
+          aria-live="polite"
+        >
+          <p class="assistant">Open a note, change its text, then close it.</p>
+        </div>
+        <div class="prompts" aria-label="Try a request">
+          <button data-prompt="Open a note">Open a note</button>
+          <button data-prompt='Update the note to "Hello from the server"'>
+            Update its text
+          </button>
+          <button data-prompt="Close the note">Close the note</button>
+        </div>
+        <form id="chat">
+          <label for="message">Your request</label>
+          <textarea
+            id="message"
+            rows="2"
+            maxlength="1100"
+            placeholder="Open a note"
+            required
+          ></textarea>
+          <button id="send">Send</button>
+        </form>
+      </aside>
+      <section id="workspace" aria-label="Live notes workspace"></section>
+    </main>
+    <script type="module" src="/client.js"></script>
+  </body>
+</html>

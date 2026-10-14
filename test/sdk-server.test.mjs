@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRegistry, createSession, executeCommand } from '@viewherd/core';
-import { createMemoryStore, createD1Store, createViewherdHandler } from '@viewherd/server';
+import { createMemoryStore, createD1Store, createController, createViewherdHandler } from '@viewherd/server';
 import { createFileStore } from '@viewherd/server/node';
 
 globalThis.crypto ??= webcrypto;
@@ -217,4 +217,188 @@ test('local file adapters share serialization and persist detached sessions acro
     await assert.rejects(a.transact('session-a', record => { record.state.app.count = 999; throw new Error('Abort'); }), /Abort/);
     assert.equal((await b.read('session-a')).state.app.count, 2);
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('backend controllers share the persisted workspace with HTTP, MCP and SSE', async () => {
+  const store = createMemoryStore({ createState });
+  const handler = makeHandler({ store, stream: { pollIntervalMs: 5, lifetimeMs: 3000 } });
+  const controller = createController({ registry, store, sessionId: 'session-a', principal: { id: 'user:a', actor: 'agent:backend' } });
+  const reader = (await handler(request('/viewherd/events'))).body.getReader();
+  try {
+    await reader.read();
+    const initial = await controller.snapshot();
+    const schema = await controller.schema();
+    assert.equal(initial.app.count, 0);
+    assert.ok(schema.panels.some(panel => panel.type === 'counter'));
+    const first = await controller.call('panel.action', {
+      paneId: 'pane_inbox', action: 'increment', args: { amount: 2 },
+    }, { requestId: 'backend-increment', expectedRevision: initial.revision });
+    assert.equal(first.state.app.count, 2);
+    assert.equal(first.state.events.at(-1).actor, 'agent:backend');
+    assert.match(new TextDecoder().decode((await reader.read()).value), /"count":2/);
+
+    const httpState = await (await handler(request('/viewherd/snapshot'))).json();
+    assert.equal(httpState.app.count, 2);
+    const mcp = await (await handler(request('/mcp', {
+      jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
+        name: 'viewherd_action_counter_increment',
+        arguments: { requestId: 'mcp-after-backend', paneId: 'pane_inbox', args: { amount: 3 }, expectedRevision: first.revision },
+      },
+    }))).json();
+    assert.equal(mcp.result.structuredContent.state.app.count, 5);
+    assert.equal((await controller.snapshot()).app.count, 5);
+    const cached = controller.state;
+    cached.app.count = 999;
+    assert.equal(controller.state.app.count, 5);
+  } finally {
+    await reader.cancel();
+    controller.destroy();
+  }
+  assert.equal(controller.state, null);
+  await assert.rejects(controller.snapshot(), { code: 'controller_destroyed' });
+});
+
+test('backend controller retries bind principal and reject overwriting newer human changes', async () => {
+  const store = createMemoryStore({ createState });
+  let userId = 'user:a';
+  const contexts = [];
+  const controller = createController({ registry, store, sessionId: 'session-a', principal(context) {
+    contexts.push(context);
+    return { id: userId, actor: 'agent:backend', serverTime: Date.now() };
+  } });
+  const action = { paneId: 'pane_inbox', action: 'increment', args: { amount: 2 } };
+  const options = { requestId: 'backend-retry', expectedRevision: 0 };
+  const first = await controller.call('panel.action', action, options);
+  const retry = await controller.call('panel.action', action, options);
+  assert.deepEqual(retry.result, first.result);
+  assert.equal(retry.replayed, true);
+  assert.equal(retry.state.app.count, 2);
+  assert.deepEqual(contexts[0], { sessionId: 'session-a', method: 'panel.action', params: action });
+  userId = 'user:b';
+  await assert.rejects(controller.call('panel.action', action, options), { code: 'id_conflict', status: 409 });
+  userId = 'user:a';
+  await assert.rejects(controller.call('panel.action', { ...action, args: { amount: 3 } }, options), { code: 'id_conflict', status: 409 });
+
+  await rpc(makeHandler({ store }), command('human-edit'));
+  await assert.rejects(controller.call('panel.action', action, {
+    requestId: 'stale-backend', expectedRevision: first.revision,
+  }), { code: 'revision_conflict', status: 409 });
+  assert.equal((await controller.snapshot()).app.count, 3);
+  assert.equal((await store.read('session-a')).receipts.length, 2);
+});
+
+test('backend controllers require a valid principal, fixed session and JSON commands before storage access', async () => {
+  let storageAccesses = 0;
+  const store = {
+    kind: 'access-guard',
+    read() { storageAccesses++; throw new Error('Unexpected read.'); },
+    transact() { storageAccesses++; throw new Error('Unexpected transaction.'); },
+  };
+  assert.throws(() => createController({ registry, store, sessionId: 'session-a' }), /principal/);
+  assert.throws(() => createController({ registry, store, sessionId: '../other', principal: { id: 'user:a' } }), { code: 'invalid_session' });
+  assert.throws(() => createController({ registry, store, sessionId: 'session-a', principal: { id: '' } }), { code: 'authorization_error' });
+  let getterRan = false;
+  const accessorPrincipal = { get id() { getterRan = true; return 'user:a'; } };
+  assert.throws(() => createController({ registry, store, sessionId: 'session-a', principal: accessorPrincipal }), { code: 'authorization_error' });
+  assert.equal(getterRan, false);
+  const cyclic = { id: 'user:a' };
+  cyclic.self = cyclic;
+  const invalid = createController({ registry, store, sessionId: 'session-a', principal: async () => cyclic });
+  await assert.rejects(invalid.snapshot(), { code: 'authorization_error' });
+  await assert.rejects(invalid.schema(), { code: 'authorization_error' });
+  const denied = createController({ registry, store, sessionId: 'session-a', principal: () => null });
+  await assert.rejects(denied.snapshot(), { code: 'unauthorized', status: 401 });
+  const valid = createController({ registry, store, sessionId: 'session-a', principal: { id: 'user:a' } });
+  await assert.rejects(valid.call('session.snapshot', {}, { sessionId: 'session-b' }), { code: 'invalid_request' });
+  await assert.rejects(valid.call('view.update', { paneId: 'pane_inbox', data: { content: 'x'.repeat(300001) } }), { code: 'body_limit', status: 413 });
+  await assert.rejects(valid.call('pane.list', { broken: undefined }), { code: 'invalid_request' });
+  const invalidHttp = makeHandler({ store, authorize: () => cyclic });
+  assert.equal((await invalidHttp(request('/viewherd/snapshot'))).status, 500);
+  assert.equal(storageAccesses, 0);
+});
+
+test('backend cancellation prevents transactions after asynchronous authentication or queueing', async () => {
+  const backing = createMemoryStore({ createState });
+  let writes = 0;
+  const counted = {
+    kind: 'counted', read: backing.read,
+    transact(id, transaction) { writes++; return backing.transact(id, transaction); },
+  };
+  const alreadyAborted = new AbortController();
+  alreadyAborted.abort();
+  const immediate = createController({ registry, store: counted, sessionId: 'session-a', principal: { id: 'user:a' } });
+  await assert.rejects(immediate.call('panel.action', command('unused').params, { signal: alreadyAborted.signal }), { name: 'AbortError' });
+  assert.equal(writes, 0);
+
+  let releaseAuthentication;
+  let startedAuthentication;
+  const ready = new Promise(resolve => { startedAuthentication = resolve; });
+  const paused = createController({ registry, store: counted, sessionId: 'session-a', principal: async () => {
+    startedAuthentication();
+    await new Promise(resolve => { releaseAuthentication = resolve; });
+    return { id: 'user:a' };
+  } });
+  const duringAuthentication = new AbortController();
+  const pending = paused.call('panel.action', command('unused').params, { signal: duringAuthentication.signal });
+  const rejected = assert.rejects(pending, { name: 'AbortError' });
+  await ready;
+  duringAuthentication.abort();
+  releaseAuthentication();
+  await rejected;
+  assert.equal(writes, 0);
+
+  let releaseQueue;
+  let enteredQueue;
+  const queued = new Promise(resolve => { enteredQueue = resolve; });
+  const delayedStore = {
+    kind: 'queue', read: backing.read,
+    async transact(id, transaction) {
+      enteredQueue();
+      await new Promise(resolve => { releaseQueue = resolve; });
+      return backing.transact(id, transaction);
+    },
+  };
+  const inQueue = new AbortController();
+  const queuedController = createController({ registry, store: delayedStore, sessionId: 'session-a', principal: { id: 'user:a' } });
+  const queuedCall = queuedController.call('panel.action', command('unused').params, { signal: inQueue.signal });
+  const queueRejected = assert.rejects(queuedCall, { name: 'AbortError' });
+  await queued;
+  inQueue.abort();
+  releaseQueue();
+  await queueRejected;
+  const record = await backing.read('session-a');
+  assert.equal(record.state.app.count, 0);
+  assert.equal(record.receipts.length, 0);
+});
+
+test('backend cancellation and result limits discard an unfinished action and its retry receipt', async () => {
+  let resume;
+  let began;
+  const ready = new Promise(resolve => { began = resolve; });
+  const customRegistry = createRegistry([{ type: 'slow', title: 'Slow', dataSchema: objectSchema({}), actions: {
+    wait: { inputSchema: objectSchema({}), async run(ctx) {
+      ctx.app.count++;
+      began();
+      await new Promise(resolve => { resume = resolve; });
+      return { count: ctx.app.count };
+    } },
+    large: { inputSchema: objectSchema({}), run(ctx) {
+      ctx.app.count++;
+      return { content: 'x'.repeat(160001) };
+    } },
+  } }]);
+  const store = createMemoryStore({ createState: id => createSession({ id, view: 'slow', data: {}, app: { count: 0 }, registry: customRegistry }) });
+  const controller = createController({ registry: customRegistry, store, sessionId: 'session-a', principal: { id: 'user:a' } });
+  const signal = new AbortController();
+  const waiting = controller.call('panel.action', { paneId: 'pane_inbox', action: 'wait', args: {} }, { requestId: 'abort-action', signal: signal.signal });
+  const rejected = assert.rejects(waiting, { name: 'AbortError' });
+  await ready;
+  signal.abort();
+  resume();
+  await rejected;
+  await assert.rejects(controller.call('panel.action', { paneId: 'pane_inbox', action: 'large', args: {} }, { requestId: 'large-action' }), { code: 'result_limit', status: 413 });
+  const record = await store.read('session-a');
+  assert.equal(record.state.app.count, 0);
+  assert.equal(record.state.revision, 0);
+  assert.equal(record.receipts.length, 0);
 });

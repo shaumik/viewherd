@@ -5,17 +5,24 @@
   "license": "MIT",
   "type": "module",
   "private": true,
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "start": "node src/server.mjs",
-    "dev": "node src/server.mjs",
-    "example": "node src/server.mjs",
+    "start": "node examples/product-studio/start.mjs",
+    "dev": "node examples/product-studio/start.mjs",
+    "example": "node examples/product-studio/start.mjs",
+    "example:basic": "node examples/basic/server.mjs",
     "pack:sdk": "node scripts/pack-sdk.mjs",
     "verify:sdk": "node scripts/verify-sdk-packages.mjs",
     "build": "node scripts/build.mjs",
     "test": "node --test test/*.test.mjs",
     "validate": "node scripts/validate-artifact.mjs"
   },
-  "bin": { "viewherd": "bin/viewherd.mjs" },
-  "engines": { "node": ">=18" }
+  "bin": {
+    "viewherd": "bin/viewherd.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
 }

@@ -11,6 +11,32 @@ const sdkServerJson = (value, status = 200, headers = {}) => new Response(JSON.s
 const sdkServerObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const sdkServerBytes = value => sdkServerEncoder.encode(JSON.stringify(value)).byteLength;
 
+function sdkServerValidateJson(value, code, path, ancestors = new Set(), depth = 0) {
+  const invalid = message => { throw sdkServerError(code, `${path} ${message}`, code === 'authorization_error' ? 500 : 400); };
+  if (depth > 30) invalid('is nested too deeply.');
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return;
+  if (typeof value === 'number' && Number.isFinite(value)) return;
+  if (typeof value !== 'object') invalid('must contain only JSON values.');
+  if (ancestors.has(value)) invalid('cannot contain cycles.');
+  const array = Array.isArray(value);
+  if (array ? Object.getPrototypeOf(value) !== Array.prototype : ![Object.prototype, null].includes(Object.getPrototypeOf(value))) invalid('must contain only plain JSON objects and arrays.');
+  ancestors.add(value);
+  for (const key of Reflect.ownKeys(value)) {
+    if (array && key === 'length') continue;
+    if (typeof key !== 'string' || ['__proto__', 'constructor', 'prototype'].includes(key)) invalid('has an unsafe key.');
+    if (array && (!/^(0|[1-9][0-9]*)$/.test(key) || !Number.isSafeInteger(Number(key)) || Number(key) >= value.length)) invalid('must be a plain JSON array.');
+    const property = Object.getOwnPropertyDescriptor(value, key);
+    if (!property.enumerable || !('value' in property)) invalid('must contain enumerable data properties only.');
+    sdkServerValidateJson(property.value, code, `${path}.${key}`, ancestors, depth + 1);
+  }
+  if (array && Object.keys(value).length !== value.length) invalid('cannot contain sparse array entries.');
+  ancestors.delete(value);
+}
+
+function sdkServerCheckAbort(signal) {
+  if (signal?.aborted) throw signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
+}
+
 function sdkServerSessionId(value) {
   if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}$/.test(value)) throw sdkServerError('invalid_session', 'sessionId must contain 1–120 letters, digits, dots, underscores, colons or hyphens.', 400);
   return value;
@@ -166,21 +192,28 @@ function sdkServerPublicError(error) {
   return { code: String(error.code ?? 'internal_error').toLowerCase(), message: error.code ? error.message : 'The server could not complete this request.' };
 }
 
+function sdkServerPrincipal(principal) {
+  if (principal === null || principal === undefined || principal === false) throw sdkServerError('unauthorized', 'Authentication is required.', 401);
+  sdkServerValidateJson(principal, 'authorization_error', 'Host principal');
+  if (!sdkServerObject(principal) || typeof principal.id !== 'string' || !principal.id.trim() || principal.id.length > 120 || (principal.actor !== undefined && (typeof principal.actor !== 'string' || !principal.actor.trim() || principal.actor.length > 120))) throw sdkServerError('authorization_error', 'Host authorize must return an authenticated principal with a string id of at most 120 characters.', 500);
+  return sdkServerClone(principal);
+}
+
 async function sdkServerAuthorize(authorize, request, context) {
   let principal;
   try { principal = await authorize(request, context); }
   catch (error) {
-    if (error.code === 'forbidden' || error.status === 403) throw sdkServerError('forbidden', error.message || 'Access to this session is denied.', 403);
-    if (error.code === 'unauthorized' || error.status === 401) throw sdkServerError('unauthorized', error.message || 'Authentication is required.', 401);
+    if (error?.code === 'forbidden' || error?.status === 403) throw sdkServerError('forbidden', error.message || 'Access to this session is denied.', 403);
+    if (error?.code === 'unauthorized' || error?.status === 401) throw sdkServerError('unauthorized', error.message || 'Authentication is required.', 401);
     throw sdkServerError('authorization_error', 'Host authorization failed.', 500);
   }
-  if (principal === null || principal === undefined || principal === false) throw sdkServerError('unauthorized', 'Authentication is required.', 401);
-  if (!sdkServerObject(principal) || typeof principal.id !== 'string' || !principal.id.trim() || principal.id.length > 120 || (principal.actor !== undefined && (typeof principal.actor !== 'string' || !principal.actor.trim() || principal.actor.length > 120))) throw sdkServerError('authorization_error', 'Host authorize must return an authenticated principal with a string id of at most 120 characters.', 500);
-  return principal;
+  return sdkServerPrincipal(principal);
 }
 
-async function sdkServerApply(record, command, registry, principal, targetType) {
+async function sdkServerApply(record, command, registry, principal, targetType, signal) {
+  sdkServerCheckAbort(signal);
   const hash = await sdkServerFingerprint(command, principal);
+  sdkServerCheckAbort(signal);
   const cached = record.receipts.find(receipt => receipt.requestId === command.requestId);
   if (cached) {
     if (cached.hash !== hash) throw sdkServerError('id_conflict', 'requestId was already used by another principal or for a different command.', 409);
@@ -189,6 +222,7 @@ async function sdkServerApply(record, command, registry, principal, targetType) 
   if (command.expectedRevision !== undefined && command.expectedRevision !== record.state.revision) throw sdkServerError('revision_conflict', 'Session changed. Refresh and retry with a new requestId.', 409);
   if (targetType && record.state.panes[command.params.paneId]?.view !== targetType) throw sdkServerError('invalid_target', `This action requires a ${targetType} pane.`, 400);
   const output = await executeCommand(record.state, command, { registry, principal });
+  sdkServerCheckAbort(signal);
   const remember = !sdkServerReads.has(command.method);
   let receipts = record.receipts;
   if (remember) {
@@ -202,6 +236,102 @@ async function sdkServerApply(record, command, registry, principal, targetType) 
     changed: storageChanged,
     response: { version: 1, requestId: command.requestId, sessionId: command.sessionId, result: output.result, revision: output.state.revision, state: output.state }
   };
+}
+
+/** A trusted backend capability bound to one authenticated principal and session. */
+export function createController({ registry, store, sessionId, principal } = {}) {
+  if (!registry || typeof registry.schema !== 'function' || typeof registry.get !== 'function' || !store || typeof store.read !== 'function' || typeof store.transact !== 'function') {
+    throw new TypeError('registry and store are required.');
+  }
+  sdkServerSessionId(sessionId);
+  if (principal === undefined || principal === null || (typeof principal !== 'function' && !sdkServerObject(principal))) {
+    throw new TypeError('A trusted principal object or principal(context) function is required.');
+  }
+  if (!globalThis.crypto?.subtle || typeof globalThis.crypto.randomUUID !== 'function') {
+    throw new TypeError('Web Crypto is required. In Node 18, assign globalThis.crypto from node:crypto webcrypto before creating the controller.');
+  }
+  if (typeof principal !== 'function') principal = sdkServerPrincipal(principal);
+  const resolvePrincipal = typeof principal === 'function' ? principal : () => principal;
+  let currentState = null;
+  let destroyed = false;
+
+  function checkActive(signal) {
+    if (destroyed) throw sdkServerError('controller_destroyed', 'This controller has been destroyed.', 400);
+    sdkServerCheckAbort(signal);
+  }
+
+  function remember(state) {
+    if (!destroyed && (!currentState || state.revision >= currentState.revision)) currentState = sdkServerClone(state);
+  }
+
+  async function authenticate(method, params, signal) {
+    checkActive(signal);
+    try {
+      return await sdkServerAuthorize(
+        (_request, context) => resolvePrincipal(context),
+        undefined,
+        { sessionId, method, params: sdkServerClone(params) }
+      );
+    } finally {
+      checkActive(signal);
+    }
+  }
+
+  async function read(method) {
+    const authenticated = await authenticate(method, {}, undefined);
+    checkActive();
+    const record = await store.read(sessionId);
+    checkActive();
+    remember(record.state);
+    if (method === 'session.snapshot') return sdkServerClone(record.state);
+    const output = await executeCommand(record.state, {
+      version: 1,
+      requestId: globalThis.crypto.randomUUID(),
+      sessionId,
+      method,
+      params: {},
+    }, { registry, principal: authenticated });
+    checkActive();
+    return output.result;
+  }
+
+  return Object.freeze({
+    sessionId,
+    get state() { return currentState === null ? null : sdkServerClone(currentState); },
+    snapshot() { return read('session.snapshot'); },
+    schema() { return read('api.schema'); },
+    async call(method, params = {}, options = {}) {
+      checkActive();
+      if (!sdkServerObject(options) || ![Object.prototype, null].includes(Object.getPrototypeOf(options))) {
+        throw sdkServerError('invalid_request', 'Call options must be a plain object.', 400);
+      }
+      for (const key of Reflect.ownKeys(options)) {
+        const property = Object.getOwnPropertyDescriptor(options, key);
+        if (!property.enumerable || !('value' in property)) throw sdkServerError('invalid_request', 'Call options must contain enumerable data properties only.', 400);
+        if (!['requestId', 'expectedRevision', 'signal'].includes(key)) throw sdkServerError('invalid_request', `Unknown call option: ${String(key)}.`, 400);
+      }
+      const { requestId = globalThis.crypto.randomUUID(), expectedRevision, signal } = options;
+      if (signal !== undefined && !(signal instanceof AbortSignal)) throw new TypeError('signal must be an AbortSignal.');
+      checkActive(signal);
+      const raw = { version: 1, requestId, sessionId, method, params, ...(expectedRevision === undefined ? {} : { expectedRevision }) };
+      sdkServerValidateJson(raw, 'invalid_request', 'Command');
+      const command = sdkServerCommand(sdkServerClone(raw));
+      if (sdkServerBytes(command) > sdkServerLimits.requestBytes) throw sdkServerError('body_limit', 'Command exceeds 300 KB.', 413);
+      const authenticated = await authenticate(command.method, command.params, signal);
+      checkActive(signal);
+      const response = await store.transact(sessionId, record => {
+        checkActive(signal);
+        return sdkServerApply(record, command, registry, authenticated, undefined, signal);
+      });
+      checkActive(signal);
+      remember(response.state);
+      return response;
+    },
+    destroy() {
+      destroyed = true;
+      currentState = null;
+    },
+  });
 }
 
 function sdkServerMcpTools(registry, fixedSessionId) {

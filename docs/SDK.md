@@ -6,14 +6,14 @@ Viewherd lets an application expose a workspace to people and agents through str
 
 The repository uses native ESM and local npm workspaces. The `@viewherd/*` names are not published to npm. From the root, run `npm install --offline --ignore-scripts`, then `npm run example` to inspect a working integration.
 
-| Package | Server/browser | Main exports |
-| --- | --- | --- |
-| `@viewherd/core` | Server | `definePanel`, `createRegistry`, `createSession`, `executeCommand` |
-| `@viewherd/server` | Server | `createViewherdHandler`, `createMemoryStore`, `createD1Store` |
-| `@viewherd/server/node` | Node server | `createFileStore` |
-| `@viewherd/client` | Browser or Fetch-capable client | `createClient`, `ViewherdError` |
-| `@viewherd/dom` | Browser | `mountWorkspace` |
-| `@viewherd/dom/styles.css` | Browser stylesheet | Structural workspace styles |
+| Package                    | Server/browser                  | Main exports                                                                      |
+| -------------------------- | ------------------------------- | --------------------------------------------------------------------------------- |
+| `@viewherd/core`           | Server                          | `definePanel`, `createRegistry`, `createSession`, `executeCommand`                |
+| `@viewherd/server`         | Server                          | `createController`, `createViewherdHandler`, `createMemoryStore`, `createD1Store` |
+| `@viewherd/server/node`    | Node server                     | `createFileStore`                                                                 |
+| `@viewherd/client`         | Browser or Fetch-capable client | `createClient`, `ViewherdError`                                                   |
+| `@viewherd/dom`            | Browser                         | `mountWorkspace`                                                                  |
+| `@viewherd/dom/styles.css` | Browser stylesheet              | Structural workspace styles                                                       |
 
 For an application in the same checkout, declare these local workspaces as dependencies. For a separate application during development, use local `file:` dependencies pointing at the packages in this checkout. Do not run `npm install @viewherd/core` expecting a published release.
 
@@ -29,75 +29,76 @@ npm install --offline --ignore-scripts \
 
 Install the core archive together with the server archive, because the server declares `@viewherd/core` as a dependency. Package exports include TypeScript declarations. Native browsers can load the dependency-free client and DOM modules directly; your build tool can resolve the same package imports.
 
-The product studio's domain and renderers are in `examples/product-studio/`. A second application is in `examples/support-desk/`. The reusable code is in `packages/`. The original lab uses the separate legacy contract in [API.md](API.md).
+Start with the [basic example](../examples/basic): its panel definitions, backend, and browser client show the complete flow. The [product studio](../examples/product-studio) adds a real agent adapter, design editing, and exports. Reusable code is in `packages/`. The original lab uses the separate legacy contract in [API.md](API.md).
 
 ## Define panels and actions
 
 Definitions are server-side contracts. Renderers are browser-side UI. Neither contains the other's implementation.
 
 ```js
-import { definePanel, createRegistry, createSession } from '@viewherd/core';
+import { definePanel, createRegistry, createSession } from "@viewherd/core";
 
 const notes = definePanel({
-  type: 'notes',
-  title: 'Notes',
-  description: 'A shared note with a validated save action.',
+  type: "notes",
+  title: "Notes",
+  description: "A shared note with a validated save action.",
   dataSchema: {
-    type: 'object',
-    properties: { content: { type: 'string', maxLength: 10000 } },
-    required: ['content'],
-    additionalProperties: false
+    type: "object",
+    properties: { content: { type: "string", maxLength: 10000 } },
+    required: ["content"],
+    additionalProperties: false,
   },
   actions: {
     save: {
-      description: 'Replace the note content.',
+      description: "Replace the note content.",
       inputSchema: {
-        type: 'object',
-        properties: { content: { type: 'string', maxLength: 10000 } },
-        required: ['content'],
-        additionalProperties: false
+        type: "object",
+        properties: { content: { type: "string", maxLength: 10000 } },
+        required: ["content"],
+        additionalProperties: false,
       },
       outputSchema: {
-        type: 'object',
-        properties: { saved: { type: 'boolean' } },
-        required: ['saved'],
-        additionalProperties: false
+        type: "object",
+        properties: { saved: { type: "boolean" } },
+        required: ["saved"],
+        additionalProperties: false,
       },
       run(ctx, args) {
-        ctx.call('view.update', {
+        ctx.call("view.update", {
           paneId: ctx.pane.id,
-          data: { content: args.content }
+          data: { content: args.content },
         });
         return { saved: true };
-      }
-    }
-  }
+      },
+    },
+  },
 });
 
 const registry = createRegistry([notes]);
-const createState = id => createSession({
-  id,
-  label: 'Team notes',
-  view: 'notes',
-  title: 'Notes',
-  data: { content: '' },
-  app: {},
-  registry
-});
+const createState = (id) =>
+  createSession({
+    id,
+    label: "Team notes",
+    view: "notes",
+    title: "Notes",
+    data: { content: "" },
+    app: {},
+    registry,
+  });
 ```
 
 The registry publishes serializable panel and action schemas, never handler functions. Use `registry.get(type)`, `registry.has(type)`, and `registry.schema()` to inspect it.
 
 An action handler receives:
 
-| Context field | Meaning |
-| --- | --- |
-| `app` | Mutable application state on this transaction's private draft |
-| `pane` | The target pane on the draft, or `undefined` after the handler closes it |
-| `state` | The current draft workspace graph |
-| `call(method, params)` | Synchronous layout/data operation within this transaction |
-| `principal` | Authenticated identity returned by the host's authorization function |
-| `requestId` | ID of the outer command |
+| Context field          | Meaning                                                                  |
+| ---------------------- | ------------------------------------------------------------------------ |
+| `app`                  | Mutable application state on this transaction's private draft            |
+| `pane`                 | The target pane on the draft, or `undefined` after the handler closes it |
+| `state`                | The current draft workspace graph                                        |
+| `call(method, params)` | Synchronous layout/data operation within this transaction                |
+| `principal`            | Authenticated identity returned by the host's authorization function     |
+| `requestId`            | ID of the outer command                                                  |
 
 Keep domain records in `state.app` and panel configuration in `pane.data`. A ticket pane can contain `{ticketId}` while the ticket and draft live in application state. Actions can update records and open, move, or close panels atomically.
 
@@ -108,24 +109,24 @@ Schemas use a deliberately limited JSON Schema subset: objects, arrays, strings,
 ## Mount an authenticated server
 
 ```js
-import { createViewherdHandler, createMemoryStore } from '@viewherd/server';
+import { createViewherdHandler, createMemoryStore } from "@viewherd/server";
 
 const store = createMemoryStore({ createState });
 const handleViewherd = createViewherdHandler({
   registry,
   store,
-  basePath: '/viewherd',
-  mcpPath: '/mcp',
+  basePath: "/viewherd",
+  mcpPath: "/mcp",
   async authorize(request, command) {
     const user = await authenticateWithYourApplication(request);
     if (!user) return null;
-    if (!await userCanAccessSession(user.id, command.sessionId)) {
-      throw Object.assign(new Error('Session access denied'), {
-        code: 'forbidden'
+    if (!(await userCanAccessSession(user.id, command.sessionId))) {
+      throw Object.assign(new Error("Session access denied"), {
+        code: "forbidden",
       });
     }
     return { id: user.id, name: user.name };
-  }
+  },
 });
 
 // Route requests for /viewherd/* and /mcp through handleViewherd(request).
@@ -141,38 +142,79 @@ Stores implement `read(sessionId)` and `transact(sessionId, transaction)`. Memor
 The handler requires Fetch Request/Response, streams, and Web Crypto in its host runtime. The included Node server initializes these appropriately. When embedding the handler in Node.js 18, initialize Web Crypto in your host bootstrap:
 
 ```js
-import { webcrypto } from 'node:crypto';
+import { webcrypto } from "node:crypto";
 globalThis.crypto ??= webcrypto;
 ```
+
+## Control the UI from your backend
+
+When the agent runs beside your application store, use `createController`. It calls the same actions as HTTP and MCP directly, without an HTTP request.
+
+```js
+import { createController } from "@viewherd/server";
+
+// Authenticate the user and check access to this session in your host first.
+const controller = createController({
+  registry,
+  store,
+  sessionId: "team-notes",
+  principal: { id: user.id, actor: "agent" },
+});
+
+const state = await controller.snapshot();
+const note = Object.values(state.panes).find((pane) => pane.view === "notes");
+const command = {
+  paneId: note.id,
+  action: "save",
+  args: { content: "Review the release notes." },
+};
+const options = {
+  requestId: "agent-save-note-001",
+  expectedRevision: state.revision,
+};
+
+await controller.call("panel.action", command, options);
+// Retry an uncertain outcome with the same command and options.
+// The browser receives the saved changes through its normal subscription.
+```
+
+The controller grants access to one session. Supply a trusted principal from your backend, never an identity supplied by the browser. A `principal(context)` function can recheck access before each operation; it receives `{sessionId, method, params}`. `snapshot()`, `schema()`, and `call()` use the same store, validation, transactions, and retry receipts as the HTTP handler.
+
+Keep the request ID and command unchanged when retrying an uncertain result. On `revision_conflict`, read the current workspace, preserve the person's edits, and use a new request ID for a newly considered command. `destroy()` ends use of the controller without deleting the session. See the [basic backend](../examples/basic/server.mjs) for a small working example and the [studio agent tools](../examples/product-studio/chat/agent-tools.mjs) for chat orchestration.
 
 ## Mount your browser UI
 
 ```js
-import { createClient } from '@viewherd/client';
-import { mountWorkspace } from '@viewherd/dom';
+import { createClient } from "@viewherd/client";
+import { mountWorkspace } from "@viewherd/dom";
 // Also load @viewherd/dom/styles.css through your application's CSS tooling.
 
 const client = createClient({
-  baseUrl: '/viewherd',
-  sessionId: 'team-notes'
+  baseUrl: "/viewherd",
+  sessionId: "team-notes",
 });
 await client.snapshot();
 
-const workspace = mountWorkspace(document.querySelector('#workspace'), {
+const workspace = mountWorkspace(document.querySelector("#workspace"), {
   client,
   panels: {
     notes: {
       mount(host, ctx) {
-        const content = document.createElement('p');
+        const content = document.createElement("p");
         host.append(content);
         function update(next) {
           content.textContent = next.pane.data.content;
         }
         update(ctx);
-        return { update, destroy() { content.remove(); } };
-      }
-    }
-  }
+        return {
+          update,
+          destroy() {
+            content.remove();
+          },
+        };
+      },
+    },
+  },
 });
 
 // When the host application unmounts:
@@ -188,14 +230,14 @@ The shell supplies panel headers, focus, close, zoom, resizing, and an optional 
 
 ## Client lifecycle
 
-| Client API | Result |
-| --- | --- |
-| `snapshot()` | Fetch and retain the authoritative state |
-| `schema()` | Fetch the running method/panel/action schemas |
-| `call(method, params, options?)` | Execute a command; return its response envelope |
-| `state` | Latest accepted state, initially `null` |
+| Client API                        | Result                                                      |
+| --------------------------------- | ----------------------------------------------------------- |
+| `snapshot()`                      | Fetch and retain the authoritative state                    |
+| `schema()`                        | Fetch the running method/panel/action schemas               |
+| `call(method, params, options?)`  | Execute a command; return its response envelope             |
+| `state`                           | Latest accepted state, initially `null`                     |
 | `subscribe((state, event) => {})` | Subscribe to state updates; returns an unsubscribe function |
-| `destroy()` | Abort streams and release subscriptions |
+| `destroy()`                       | Abort streams and release subscriptions                     |
 
 `call` options accept `requestId`, `expectedRevision`, and an optional abort `signal`. The client generates a request ID when omitted. For a retry after an uncertain outcome, supply the same ID and unchanged command. For a human edit based on a snapshot, pass that snapshot's revision and show a merge/reload decision on conflict. Structured failures throw `ViewherdError` with `code`, `status`, and the server response. The client accepts authoritative error state before throwing when the server provides it.
 
@@ -203,13 +245,13 @@ The first subscriber starts one shared Fetch-based SSE connection. The client ca
 
 ## Wire contract
 
-| Endpoint | Purpose |
-| --- | --- |
-| `GET /viewherd/snapshot?sessionId=ID` | Current session state |
-| `GET /viewherd/schema?sessionId=ID` | Method and registered panel schemas |
-| `GET /viewherd/events?sessionId=ID` | SSE authoritative-state subscription |
-| `POST /viewherd/rpc` | Command execution |
-| `POST /mcp` | MCP adapter to the same dispatcher |
+| Endpoint                              | Purpose                              |
+| ------------------------------------- | ------------------------------------ |
+| `GET /viewherd/snapshot?sessionId=ID` | Current session state                |
+| `GET /viewherd/schema?sessionId=ID`   | Method and registered panel schemas  |
+| `GET /viewherd/events?sessionId=ID`   | SSE authoritative-state subscription |
+| `POST /viewherd/rpc`                  | Command execution                    |
+| `POST /mcp`                           | MCP adapter to the same dispatcher   |
 
 Command envelope:
 
