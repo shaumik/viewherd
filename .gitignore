@@ -1,0 +1,9 @@
+dist/
+site.tar.gz
+worker/index.js
+.webdr/
+.sites-runtime/
+*.zip
+node_modules/
+.env
+artifacts/

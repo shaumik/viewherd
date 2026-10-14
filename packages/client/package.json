@@ -1,0 +1,11 @@
+{
+  "name": "@viewherd/client",
+  "version": "0.2.0",
+  "description": "Viewherd HTTP commands and shared event-stream client",
+  "type": "module",
+  "license": "MIT",
+  "exports": { ".": { "types": "./index.d.ts", "import": "./index.mjs", "default": "./index.mjs" } },
+  "types": "./index.d.ts",
+  "files": ["index.mjs", "index.d.ts", "README.md", "LICENSE"],
+  "engines": { "node": ">=18" }
+}

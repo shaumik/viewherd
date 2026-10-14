@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#11171d">
+  <meta name="description" content="One workspace. You and your agents. Viewherd is an open-source web app with an API for every workspace action.">
+  <title>Viewherd — a workspace agents can use</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23131b22'/%3E%3Cpath d='m12 19 8 26 12-18 12 18 8-26' stroke='%23baf579' stroke-width='6' fill='none' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell" id="shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="/" aria-label="Viewherd home"><span class="brand-symbol">w<span>›</span></span><span>viewherd<small>THE SHARED WORKSPACE</small></span></a>
+      <button class="new-workspace" id="new-workspace"><span data-icon="plus"></span>New workspace<span class="key-hint">＋</span></button>
+      <div class="section-label">WORKSPACES <span id="workspace-count">0</span></div>
+      <nav id="workspaces" aria-label="Workspaces"></nav>
+      <div class="sidebar-note"><span class="note-orbit" data-icon="orbit"></span><strong>One canvas.<br>You + your agents.</strong><p>Every action you can take,<br>your agent can take too.</p></div>
+      <div class="sidebar-bottom">
+        <button class="sidebar-link panel-demo-link" id="panel-control-demo"><span data-icon="split-right"></span>Panel control demo<span class="link-arrow">↗</span></button>
+        <button class="sidebar-link" id="api-guide"><span data-icon="code"></span>Developer API<span class="link-arrow">↗</span></button>
+        <button class="sidebar-link" id="keyboard-help"><span data-icon="command"></span>Command palette<kbd>⌘ K</kbd></button>
+        <div class="sidebar-footer"><span class="mini-logo">w›</span><span>OPEN SOURCE<span class="version">v0.1 · first light</span></span><span class="live-dot"></span></div>
+      </div>
+    </aside>
+    <main class="main-workspace">
+      <header class="topbar">
+        <button class="icon-button mobile-menu" id="mobile-menu" aria-label="Toggle workspaces"><span data-icon="menu"></span></button>
+        <div class="breadcrumb"><span data-icon="layers"></span><span id="workspace-label">Your workspace</span><span class="breadcrumb-divider">/</span><span class="subtle" id="tab-label">Overview</span></div>
+        <div class="topbar-actions"><span class="connection" id="connection"><span class="live-dot"></span>Connecting</span><button class="demo-button" id="run-demo"><span data-icon="play"></span><span>Run live demo</span></button><button class="icon-button agent-toggle" id="agent-toggle" aria-label="Toggle agent activity" title="Agent activity"><span data-icon="panel-right"></span></button></div>
+      </header>
+      <div class="tabbar"><div class="tabs" id="tabs" role="tablist"></div><button class="icon-button" id="add-tab" title="New tab" aria-label="New tab"><span data-icon="plus"></span></button><span class="tabbar-right" id="revision-badge">LIVE WORKSPACE</span></div>
+      <div class="workspace-toolbar"><div class="toolbar-context"><span class="live-dot"></span><span id="workspace-context">Shared state. Instant control.</span></div><div class="workspace-tools"><button class="tool-button" id="add-view"><span data-icon="plus"></span><span>Add view</span></button><button class="tool-button" id="split-right"><span data-icon="split-right"></span><span>Split</span></button><button class="icon-button" id="workspace-more" title="Workspace options" aria-label="Workspace options"><span data-icon="dots"></span></button></div></div>
+      <div class="work-area"><div class="pane-canvas" id="pane-canvas"><div class="loading-state"><span class="brand-symbol">w<span>›</span></span><h2>Opening your workspace</h2><p>Connecting the canvas and the API.</p></div></div>
+        <aside class="agent-rail" id="agent-rail">
+          <div class="rail-title"><span data-icon="orbit"></span><strong>Agent activity</strong><span class="rail-live">LIVE</span></div>
+          <div id="demo-status" class="demo-status"><div class="demo-kicker">TAKE IT FOR A SPIN</div><h3>Watch an agent<br>build a workspace.</h3><p>Real API calls. Live views.<br>The same controls you use.</p><button id="rail-run-demo" class="rail-demo-button"><span data-icon="play"></span>Run the scripted demo<span data-icon="arrow-right"></span></button><span class="demo-disclosure">A scripted agent demonstration</span></div>
+          <div id="agents" class="agents"></div>
+          <div class="rail-section-label">EVENT STREAM<span id="event-count"></span></div><div id="events" class="event-stream"><div class="quiet-state">Workspace changes appear here.<br>Everything leaves a trail.</div></div>
+          <button class="open-console" id="open-console"><span data-icon="terminal"></span>Make an API call<span data-icon="arrow-up-right"></span></button>
+        </aside>
+      </div>
+      <footer class="statusbar"><div><span data-icon="radio"></span><span id="sync-status">Shared workspace</span><span class="status-separator">·</span><span id="pane-count">0 views</span></div><button id="status-palette">Commands <kbd>⌘ K</kbd></button><span class="status-brand">BUILT FOR HUMAN + AGENT</span></footer>
+    </main>
+  </div>
+  <div id="overlay-root"></div><div id="toast-root" class="toast-root" aria-live="polite"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

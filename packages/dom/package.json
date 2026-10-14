@@ -1,0 +1,11 @@
+{
+  "name": "@viewherd/dom",
+  "version": "0.2.0",
+  "description": "Stable DOM workspace shell for Viewherd custom panel renderers",
+  "type": "module",
+  "license": "MIT",
+  "exports": { ".": { "types": "./index.d.ts", "import": "./index.mjs", "default": "./index.mjs" }, "./styles.css": "./styles.css" },
+  "types": "./index.d.ts",
+  "files": ["index.mjs", "index.d.ts", "styles.css", "README.md", "LICENSE"],
+  "engines": { "node": ">=18" }
+}

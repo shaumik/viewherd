@@ -1,0 +1,21 @@
+{
+  "name": "viewherd",
+  "version": "0.2.0",
+  "description": "An embeddable workspace SDK for applications humans and agents can control",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "start": "node src/server.mjs",
+    "dev": "node src/server.mjs",
+    "example": "node src/server.mjs",
+    "pack:sdk": "node scripts/pack-sdk.mjs",
+    "verify:sdk": "node scripts/verify-sdk-packages.mjs",
+    "build": "node scripts/build.mjs",
+    "test": "node --test test/*.test.mjs",
+    "validate": "node scripts/validate-artifact.mjs"
+  },
+  "bin": { "viewherd": "bin/viewherd.mjs" },
+  "engines": { "node": ">=18" }
+}

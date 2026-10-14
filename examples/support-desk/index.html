@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f6f2">
+  <meta name="description" content="Relay, a useful support workspace built with the Viewherd SDK.">
+  <title>Relay — a Viewherd example</title>
+  <link rel="stylesheet" href="/sdk/dom/styles.css">
+  <link rel="stylesheet" href="/examples/support-desk/styles.css">
+</head>
+<body>
+  <div class="relay-app">
+    <nav class="nav-rail" aria-label="Relay navigation">
+      <a class="relay-mark" href="/" aria-label="Relay home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h7a6 6 0 0 1 0 12H8m-3-5h9M5 5v14"/></svg></a>
+      <div class="rail-main">
+        <button class="rail-button active" type="button" aria-label="Support inbox" aria-current="page" id="inbox-nav"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM5 14h4l2 3h2l2-3h4M8 8h8M8 11h5"/></svg></button>
+        <button class="rail-button" type="button" aria-label="Explore the SDK integration" id="sdk-nav"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 7-5 5 5 5m8-10 5 5-5 5m-3-13-2 16"/></svg></button>
+      </div>
+      <span class="rail-profile" aria-label="Alex, sample support agent">A</span>
+    </nav>
+    <main class="app-main">
+      <header class="app-header">
+        <div class="breadcrumb"><span>Relay</span><span class="breadcrumb-divider">/</span><strong>Support</strong></div>
+        <div class="header-actions">
+          <span class="sample-badge"><span></span>Sample workspace</span>
+          <button class="button button-quiet integration-button" type="button" id="integration-button">Built with Viewherd<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+          <button class="button assist-header" type="button" id="assist-button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z"/></svg><span>Assist</span><span class="assist-running" hidden></span></button>
+        </div>
+      </header>
+      <div class="workspace-wrap">
+        <div id="workspace" aria-label="Support workspace"></div>
+        <div id="startup" class="startup"><div class="startup-mark">R</div><h1>Your support workspace</h1><p id="startup-message">Connecting to Relay…</p><button id="startup-retry" class="button button-primary" type="button" hidden>Try again</button></div>
+      </div>
+      <footer class="app-footer"><span><i id="connection-dot" class="connection-dot"></i><span id="connection-label">Connecting</span></span><span class="footer-caption">A working example of the Viewherd SDK</span><button type="button" id="reset-button">Reset sample</button></footer>
+    </main>
+  </div>
+  <div id="drawer-shade" class="drawer-shade" hidden></div>
+  <aside id="assistant-drawer" class="side-drawer" role="dialog" aria-modal="true" aria-labelledby="assistant-title" hidden>
+    <header class="drawer-header"><div class="drawer-heading"><span class="assistant-symbol"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z"/></svg></span><h2 id="assistant-title">Relay Assist</h2></div><button class="icon-button drawer-close" type="button" aria-label="Close assistant"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg></button></header>
+    <div class="drawer-content">
+      <span class="eyebrow">A small, useful workflow</span>
+      <h3 id="assist-subject">Turn context into a considered reply.</h3>
+      <p class="drawer-intro">Open the customer’s billing context, check the evidence, and prepare a reply for your review.</p>
+      <div class="workflow-target" id="workflow-target"></div>
+      <button class="button button-primary workflow-start" type="button" id="workflow-start"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z"/></svg>Review context & draft</button>
+      <p class="workflow-disclosure">Scripted sample workflow · no model connected</p>
+      <ol class="workflow-steps" id="workflow-steps" hidden></ol>
+      <div class="workflow-result" id="workflow-result" hidden></div>
+      <details class="workflow-details" id="workflow-details" hidden><summary>See the SDK calls</summary><div id="workflow-calls"></div></details>
+    </div>
+    <footer class="drawer-footer"><span>Every step updates the actual workspace.</span></footer>
+  </aside>
+  <aside id="integration-drawer" class="side-drawer integration-drawer" role="dialog" aria-modal="true" aria-labelledby="integration-title" hidden>
+    <header class="drawer-header"><div><span class="eyebrow">The Viewherd SDK</span><h2 id="integration-title">Your app. Agent addressable.</h2></div><button class="icon-button drawer-close" type="button" aria-label="Close integration details"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg></button></header>
+    <div class="drawer-content"><p class="drawer-intro">Relay’s inbox, tickets, customer context, and composer are custom panels. The SDK manages the workspace and routes their actions.</p>
+      <div class="integration-feature"><span>01</span><div><h3>Register your panels</h3><p>Keep your UI and business logic. Define each panel’s data and named actions on your server.</p></div></div>
+      <div class="integration-feature"><span>02</span><div><h3>Mount the workspace</h3><p>Your renderers plug into a small DOM shell. Tabs, splits, focus, and panel lifecycle come from Viewherd.</p></div></div>
+      <div class="integration-feature"><span>03</span><div><h3>Connect your agent</h3><p>HTTP and MCP share one command contract. SSE keeps every connected UI in sync.</p></div></div>
+      <pre class="integration-code"><code>import { createClient } from '@viewherd/client';
+import { mountWorkspace } from '@viewherd/dom';
+
+const client = createClient({
+  baseUrl: '/webdr',
+  sessionId: 'support-desk'
+});
+
+mountWorkspace(element, { client, panels });
+
+await client.call('panel.action', {
+  paneId: ticketPane.id,
+  action: 'prepareReply',
+  args: {}
+});</code></pre>
+      <div class="integration-note"><strong>A real reference app</strong><p>Relay uses these local SDK packages. The sample never sends email or executes refunds; your host application owns authentication and external actions.</p></div>
+    </div><footer class="drawer-footer"><span>Original open source · MIT licensed</span></footer>
+  </aside>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script type="module" src="/examples/support-desk/app.js"></script>
+</body>
+</html>

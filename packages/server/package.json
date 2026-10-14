@@ -1,0 +1,14 @@
+{
+  "name": "@viewherd/server",
+  "version": "0.2.0",
+  "description": "Authorized HTTP, SSE and MCP transport for Viewherd workspaces",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": { "types": "./index.d.ts", "import": "./index.mjs" },
+    "./node": { "types": "./node.d.ts", "import": "./node.mjs" }
+  },
+  "files": ["*.mjs", "*.d.ts", "README.md", "LICENSE"],
+  "dependencies": { "@viewherd/core": "0.2.0" },
+  "engines": { "node": ">=18" }
+}
